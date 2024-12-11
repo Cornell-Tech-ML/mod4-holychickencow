@@ -89,6 +89,7 @@ lint.ignore = [
     "D400",
     "D401",
     "D105",
+    "D203",
     "D415",
     "D402",
     "D205",
@@ -147,9 +148,6 @@ lint.fixable = [
     "YTT",
 ]
 lint.unfixable = []
-
-[tool.ruff.lint.ignore]
-"D203" = true
 
 
 [tool.ruff.lint.extend-per-file-ignores]
