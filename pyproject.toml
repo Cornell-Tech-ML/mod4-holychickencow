@@ -148,5 +148,9 @@ lint.fixable = [
 ]
 lint.unfixable = []
 
+[tool.ruff.lint.ignore]
+"D203" = true
+
+
 [tool.ruff.lint.extend-per-file-ignores]
 "tests/**/*.py" = ["D"]
