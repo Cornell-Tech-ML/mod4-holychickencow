@@ -7,7 +7,7 @@ name = "minitorch"
 version = "0.5"
 
 [tool.pyright]
-pythonVersion = "latest"
+pythonVersion = "3.11"
 include = ["**/minitorch"]
 ignore = [
     "**/docs",

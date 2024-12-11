@@ -49,6 +49,7 @@ def _tensor_conv1d(
     shape (batch, out_channels, width).
 
     Args:
+    ----
         out (Storage): storage for output tensor.
         out_shape (Shape): shape of the output tensor.
         out_strides (Strides): strides of the output tensor.
@@ -99,11 +100,13 @@ class Conv1dFun(Function):
         """Perform a 1D convolution forward pass.
 
         Args:
+        ----
             ctx (Context): Context for saving data for backward pass.
             input (Tensor): Input tensor (batch, in_channels, width).
             weight (Tensor): Weight tensor (out_channels, in_channels, k_width).
 
         Returns:
+        -------
             Tensor: The result of the convolution (batch, out_channels, width).
 
         """
@@ -114,12 +117,12 @@ class Conv1dFun(Function):
 
         # Allocate output
         output = input.zeros((batch, out_channels, w))
-        tensor_conv1d(# type: ignore
+        tensor_conv1d(  # type: ignore
             *output.tuple(),
             output.size,
             *input.tuple(),
             *weight.tuple(),
-            False,# type: ignore
+            False,  # type: ignore
         )
         return output
 
@@ -135,24 +138,24 @@ class Conv1dFun(Function):
         grad_weight = grad_output.zeros((in_channels, out_channels, kw))
         new_input = input.permute(1, 0, 2)
         new_grad_output = grad_output.permute(1, 0, 2)
-        tensor_conv1d(# type: ignore
+        tensor_conv1d(  # type: ignore
             *grad_weight.tuple(),
             grad_weight.size,
             *new_input.tuple(),
             *new_grad_output.tuple(),
-            False,# type: ignore
+            False,  # type: ignore
         )
         grad_weight = grad_weight.permute(1, 0, 2)
 
         # Gradient wrt input
         grad_input = input.zeros((batch, in_channels, w))
         new_weight = weight.permute(1, 0, 2)
-        tensor_conv1d(# type: ignore
+        tensor_conv1d(  # type: ignore
             *grad_input.tuple(),
-            grad_input.size,# type: ignore
+            grad_input.size,  # type: ignore
             *grad_output.tuple(),
             *new_weight.tuple(),
-            True,# type: ignore
+            True,  # type: ignore
         )
         return grad_input, grad_weight
 
@@ -180,6 +183,7 @@ def _tensor_conv2d(
     (batch, out_channels, height, width).
 
     Args:
+    ----
         out (Storage): Output storage.
         out_shape (Shape): Output shape.
         out_strides (Strides): Output strides.
@@ -226,7 +230,9 @@ def _tensor_conv2d(
                                 if 0 <= ih < height and 0 <= iw < width:
                                     acc += (
                                         input[b * s10 + ic * s11 + ih * s12 + iw * s13]
-                                        * weight[oc * s20 + ic * s21 + kh_ * s22 + kw_ * s23]
+                                        * weight[
+                                            oc * s20 + ic * s21 + kh_ * s22 + kw_ * s23
+                                        ]
                                     )
                     out[b * s30 + oc * s31 + oh * s32 + ow * s33] = acc
 
@@ -240,11 +246,13 @@ class Conv2dFun(Function):
         """Compute a 2D Convolution forward pass.
 
         Args:
+        ----
             ctx (Context): Context to save tensors for backward.
             input (Tensor): Input tensor (batch, in_channels, height, width).
             weight (Tensor): Weight tensor (out_channels, in_channels, k_height, k_width).
 
         Returns:
+        -------
             Tensor: Output after 2D convolution (batch, out_channels, height, width).
 
         """
@@ -254,12 +262,12 @@ class Conv2dFun(Function):
         assert in_channels == in_channels_w
 
         output = input.zeros((batch, out_channels, h, w))
-        tensor_conv2d(# type: ignore
+        tensor_conv2d(  # type: ignore
             *output.tuple(),
             output.size,
             *input.tuple(),
             *weight.tuple(),
-            False,# type: ignore
+            False,  # type: ignore
         )
         return output
 
@@ -274,23 +282,23 @@ class Conv2dFun(Function):
         grad_weight = grad_output.zeros((in_channels, out_channels, kh, kw))
         new_input = input.permute(1, 0, 2, 3)
         new_grad_output = grad_output.permute(1, 0, 2, 3)
-        tensor_conv2d(# type: ignore
+        tensor_conv2d(  # type: ignore
             *grad_weight.tuple(),
             grad_weight.size,
             *new_input.tuple(),
             *new_grad_output.tuple(),
-            False,# type: ignore
+            False,  # type: ignore
         )
         grad_weight = grad_weight.permute(1, 0, 2, 3)
 
         grad_input = input.zeros((batch, in_channels, h, w))
         new_weight = weight.permute(1, 0, 2, 3)
-        tensor_conv2d(# type: ignore
+        tensor_conv2d(  # type: ignore
             *grad_input.tuple(),
-            grad_input.size,# type: ignore
+            grad_input.size,  # type: ignore
             *grad_output.tuple(),
             *new_weight.tuple(),
-            True,# type: ignore
+            True,  # type: ignore
         )
         return grad_input, grad_weight
 
