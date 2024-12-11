@@ -7,6 +7,7 @@ name = "minitorch"
 version = "0.5"
 
 [tool.pyright]
+pythonVersion = "3.11"
 include = ["**/minitorch"]
 ignore = [
     "**/docs",
@@ -74,7 +75,7 @@ exclude = [
     "**/docs/**/*",
 ]
 
-ignore = [
+lint.ignore = [
     "ANN101",
     "ANN401",
     "N801",
@@ -88,6 +89,7 @@ ignore = [
     "D400",
     "D401",
     "D105",
+    "D203",
     "D415",
     "D402",
     "D205",
@@ -98,8 +100,8 @@ ignore = [
     "ANN204",
     "ANN102",
 ]
-select = ["D", "E", "F", "N", "ANN"]
-fixable = [
+lint.select = ["D", "E", "F", "N", "ANN"]
+lint.fixable = [
     "A",
     "B",
     "C",
@@ -145,7 +147,8 @@ fixable = [
     "UP",
     "YTT",
 ]
-unfixable = []
+lint.unfixable = []
 
-[tool.ruff.extend-per-file-ignores]
+
+[tool.ruff.lint.extend-per-file-ignores]
 "tests/**/*.py" = ["D"]

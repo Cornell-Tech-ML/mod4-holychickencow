@@ -1,5 +1,4 @@
-"""
-Be sure you have minitorch installed in you Virtual Env.
+"""Be sure you have minitorch installed in you Virtual Env.
 >>> pip install -Ue .
 """
 
@@ -11,7 +10,9 @@ import minitorch
 class Network(minitorch.Module):
     def __init__(self, hidden_layers):
         super().__init__()
-        raise NotImplementedError("Need to include this file from past assignment.")
+        self.layer1 = Linear(2, hidden_layers)
+        self.layer2 = Linear(hidden_layers, hidden_layers)
+        self.layer3 = Linear(hidden_layers, 1)
 
     def forward(self, x):
         middle = [h.relu() for h in self.layer1.forward(x)]
@@ -40,7 +41,15 @@ class Linear(minitorch.Module):
             )
 
     def forward(self, inputs):
-        raise NotImplementedError("Need to include this file from past assignment.")
+        outputs = []
+        for j in range(len(self.bias)):
+            # Start with the bias for the j-th output neuron (extracting the Scalar value)
+            y = self.bias[j].value
+            # Add the weighted inputs (extracting Scalar values from Parameters)
+            for i in range(len(inputs)):
+                y = y + (self.weights[i][j].value * inputs[i])
+            outputs.append(y)
+        return outputs
 
 
 def default_log_fn(epoch, total_loss, correct, losses):
@@ -100,7 +109,6 @@ class ScalarTrain:
 
 if __name__ == "__main__":
     PTS = 50
-    HIDDEN = 2
+    DATASET = minitorch.datasets["Xor"](PTS)
+    HIDDEN = 15
     RATE = 0.5
-    data = minitorch.datasets["Simple"](PTS)
-    ScalarTrain(HIDDEN).train(data, RATE)
