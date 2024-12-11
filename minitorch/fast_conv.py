@@ -30,67 +30,64 @@ broadcast_index = njit(broadcast_index)
 
 
 def _tensor_conv1d(
-    output_storage: Storage,
-    output_shape: Shape,
-    output_strides: Strides,
-    total_elements: int,
-    input_storage: Storage,
+    out: Storage,
+    out_shape: Shape,
+    out_strides: Strides,
+    out_size: int,
+    input: Storage,
     input_shape: Shape,
     input_strides: Strides,
-    kernel_storage: Storage,
-    kernel_shape: Shape,
-    kernel_strides: Strides,
-    reverse_order: bool,
+    weight: Storage,
+    weight_shape: Shape,
+    weight_strides: Strides,
+    reverse: bool,
 ) -> None:
-    """Implementation of 1D Convolution using nested parallel loops.
+    """1D Convolution implementation.
+
+    Given input tensor of shape (batch, in_channels, width) and weight tensor
+    of shape (out_channels, in_channels, k_width), computes an output of
+    shape (batch, out_channels, width).
 
     Args:
-    ----
-        output_storage (Storage): Storage for the output tensor.
-        output_shape (Shape): Shape of the output tensor.
-        output_strides (Strides): Strides of the output tensor.
-        total_elements (int): Total number of elements in the output tensor.
-        input_storage (Storage): Storage for the input tensor.
-        input_shape (Shape): Shape of the input tensor.
-        input_strides (Strides): Strides of the input tensor.
-        kernel_storage (Storage): Storage for the kernel tensor.
-        kernel_shape (Shape): Shape of the kernel tensor.
-        kernel_strides (Strides): Strides of the kernel tensor.
-        reverse_order (bool): Flag to determine kernel alignment.
+        out (Storage): storage for output tensor.
+        out_shape (Shape): shape of the output tensor.
+        out_strides (Strides): strides of the output tensor.
+        out_size (int): number of elements in the output tensor.
+        input (Storage): storage for the input tensor.
+        input_shape (Shape): shape of the input tensor.
+        input_strides (Strides): strides of the input tensor.
+        weight (Storage): storage for the weight tensor.
+        weight_shape (Shape): shape of the weight tensor.
+        weight_strides (Strides): strides of the weight tensor.
+        reverse (bool): Whether to anchor the kernel at the left (False) or right (True).
 
     """
-    out_batch, out_ch, out_width = output_shape
-    in_batch, in_ch, in_width = input_shape
-    kernel_ch, kernel_in_ch, kernel_width = kernel_shape
+    batch_, out_channels, out_width = out_shape
+    batch, in_channels, width = input_shape
+    out_channels_, in_channels_, kw = weight_shape
+    assert (
+        batch == batch_
+        and in_channels == in_channels_
+        and out_channels == out_channels_
+    )
 
-    # Ensure tensor dimensions match for convolution
-    assert in_batch == out_batch and in_ch == kernel_in_ch and out_ch == kernel_ch
+    s1 = input_strides
+    s2 = weight_strides
+    s3 = out_strides
 
-    in_s = input_strides
-    ker_s = kernel_strides
-    out_s = output_strides
-
-    for b in prange(out_batch):
-        for oc in prange(out_ch):
+    for b in prange(batch):
+        for oc in prange(out_channels):
             for ow in prange(out_width):
-                accumulator = 0.0
-                for ic in prange(in_ch):
-                    for kw in prange(kernel_width):
-                        if reverse_order:
-                            input_idx = ow - kw
-                        else:
-                            input_idx = ow + kw
-                        if 0 <= input_idx < in_width:
-                            input_val = input_storage[
-                                b * in_s[0] + ic * in_s[1] + input_idx * in_s[2]
-                            ]
-                            kernel_val = kernel_storage[
-                                oc * ker_s[0] + ic * ker_s[1] + kw * ker_s[2]
-                            ]
-                            accumulator += input_val * kernel_val
-                output_storage[b * out_s[0] + oc * out_s[1] + ow * out_s[2]] = (
-                    accumulator
-                )
+                acc = 0.0
+                for ic in prange(in_channels):
+                    for kw_ in prange(kw):
+                        iw = ow - kw_ if reverse else ow + kw_
+                        if 0 <= iw < width:
+                            acc += (
+                                input[b * s1[0] + ic * s1[1] + iw * s1[2]]
+                                * weight[oc * s2[0] + ic * s2[1] + kw_ * s2[2]]
+                            )
+                out[b * s3[0] + oc * s3[1] + ow * s3[2]] = acc
 
 
 tensor_conv1d = njit(_tensor_conv1d, parallel=True)
@@ -98,161 +95,140 @@ tensor_conv1d = njit(_tensor_conv1d, parallel=True)
 
 class Conv1dFun(Function):
     @staticmethod
-    def forward(ctx: Context, input_tensor: Tensor, kernel_tensor: Tensor) -> Tensor:
-        """Performs the forward pass of a 1D Convolution.
+    def forward(ctx: Context, input: Tensor, weight: Tensor) -> Tensor:
+        """Perform a 1D convolution forward pass.
 
         Args:
-        ----
-            ctx (Context): Context to save tensors for backward pass.
-            input_tensor (Tensor): Input tensor with shape (batch, in_channels, width).
-            kernel_tensor (Tensor): Kernel tensor with shape (out_channels, in_channels, kernel_width).
+            ctx (Context): Context for saving data for backward pass.
+            input (Tensor): Input tensor (batch, in_channels, width).
+            weight (Tensor): Weight tensor (out_channels, in_channels, k_width).
 
         Returns:
-        -------
-            Tensor: Output tensor after convolution with shape (batch, out_channels, width).
+            Tensor: The result of the convolution (batch, out_channels, width).
 
         """
-        ctx.save_for_backward(input_tensor, kernel_tensor)
-        batch, in_channels, width = input_tensor.shape
-        out_channels, in_channels_k, kernel_width = kernel_tensor.shape
-        assert in_channels == in_channels_k
+        ctx.save_for_backward(input, weight)
+        batch, in_channels, w = input.shape
+        out_channels, in_channels_w, kw = weight.shape
+        assert in_channels == in_channels_w
 
-        # Initialize the output tensor with zeros
-        output = input_tensor.zeros((batch, out_channels, width))
-
-        # Execute the convolution
+        # Allocate output
+        output = input.zeros((batch, out_channels, w))
         tensor_conv1d(
             *output.tuple(),
             output.size,
-            *input_tensor.tuple(),
-            *kernel_tensor.tuple(),
+            *input.tuple(),
+            *weight.tuple(),
             False,
         )
         return output
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
-        """Computes gradients for the 1D Convolution.
+        """Compute gradients for 1D convolution."""
+        input, weight = ctx.saved_values
+        batch, in_channels, w = input.shape
+        out_channels, in_channels_w, kw = weight.shape
+        assert in_channels == in_channels_w
 
-        Args:
-        ----
-            ctx (Context): Context containing saved tensors.
-            grad_output (Tensor): Gradient of the loss with respect to the output.
-
-        Returns:
-        -------
-            Tuple[Tensor, Tensor]: Gradients with respect to input and kernel tensors.
-
-        """
-        input_tensor, kernel_tensor = ctx.saved_values
-        batch, in_channels, width = input_tensor.shape
-        out_channels, in_channels_k, kernel_width = kernel_tensor.shape
-
-        grad_kernel = grad_output.zeros((in_channels, out_channels, kernel_width))
-        transposed_input = input_tensor.permute(1, 0, 2)
-        transposed_grad_output = grad_output.permute(1, 0, 2)
-
+        # Gradient wrt weight
+        grad_weight = grad_output.zeros((in_channels, out_channels, kw))
+        new_input = input.permute(1, 0, 2)
+        new_grad_output = grad_output.permute(1, 0, 2)
         tensor_conv1d(
-            *grad_kernel.tuple(),
-            grad_kernel.size,
-            *transposed_input.tuple(),
-            *transposed_grad_output.tuple(),
+            *grad_weight.tuple(),
+            grad_weight.size,
+            *new_input.tuple(),
+            *new_grad_output.tuple(),
             False,
         )
-        grad_kernel = grad_kernel.permute(1, 0, 2)
+        grad_weight = grad_weight.permute(1, 0, 2)
 
-        grad_input = input_tensor.zeros((batch, in_channels, width))
-        transposed_kernel = kernel_tensor.permute(1, 0, 2)
-
+        # Gradient wrt input
+        grad_input = input.zeros((batch, in_channels, w))
+        new_weight = weight.permute(1, 0, 2)
         tensor_conv1d(
             *grad_input.tuple(),
             grad_input.size,
             *grad_output.tuple(),
-            *transposed_kernel.tuple(),
+            *new_weight.tuple(),
             True,
         )
-        return grad_input, grad_kernel
+        return grad_input, grad_weight
 
 
 conv1d = Conv1dFun.apply
 
 
 def _tensor_conv2d(
-    output_storage: Storage,
-    output_shape: Shape,
-    output_strides: Strides,
-    total_elements: int,
-    input_storage: Storage,
+    out: Storage,
+    out_shape: Shape,
+    out_strides: Strides,
+    out_size: int,
+    input: Storage,
     input_shape: Shape,
     input_strides: Strides,
-    kernel_storage: Storage,
-    kernel_shape: Shape,
-    kernel_strides: Strides,
-    reverse_order: bool,
+    weight: Storage,
+    weight_shape: Shape,
+    weight_strides: Strides,
+    reverse: bool,
 ) -> None:
-    """Implementation of 2D Convolution using nested parallel loops.
+    """2D Convolution implementation.
+
+    Given input (batch, in_channels, height, width) and weight
+    (out_channels, in_channels, k_height, k_width), produces output
+    (batch, out_channels, height, width).
 
     Args:
-    ----
-        output_storage (Storage): Storage for the output tensor.
-        output_shape (Shape): Shape of the output tensor.
-        output_strides (Strides): Strides of the output tensor.
-        total_elements (int): Total number of elements in the output tensor.
-        input_storage (Storage): Storage for the input tensor.
-        input_shape (Shape): Shape of the input tensor.
-        input_strides (Strides): Strides of the input tensor.
-        kernel_storage (Storage): Storage for the kernel tensor.
-        kernel_shape (Shape): Shape of the kernel tensor.
-        kernel_strides (Strides): Strides of the kernel tensor.
-        reverse_order (bool): Flag to determine kernel alignment.
+        out (Storage): Output storage.
+        out_shape (Shape): Output shape.
+        out_strides (Strides): Output strides.
+        out_size (int): Number of elements in the output tensor.
+        input (Storage): Input storage.
+        input_shape (Shape): Input shape.
+        input_strides (Strides): Input strides.
+        weight (Storage): Weight storage.
+        weight_shape (Shape): Weight shape.
+        weight_strides (Strides): Weight strides.
+        reverse (bool): Whether to anchor kernel top-left (False) or bottom-right (True).
 
     """
-    out_batch, out_ch, out_h, out_w = output_shape
-    in_batch, in_ch, in_h, in_w = input_shape
-    kernel_ch, kernel_in_ch, kernel_h, kernel_w = kernel_shape
+    batch_, out_channels, out_height, out_width = out_shape
+    batch, in_channels, height, width = input_shape
+    out_channels_, in_channels_, kh, kw = weight_shape
+    assert (
+        batch == batch_
+        and in_channels == in_channels_
+        and out_channels == out_channels_
+    )
 
-    # Validate tensor dimensions for convolution
-    assert in_batch == out_batch and in_ch == kernel_in_ch and out_ch == kernel_ch
+    s1 = input_strides
+    s2 = weight_strides
+    s3 = out_strides
+    s10, s11, s12, s13 = s1
+    s20, s21, s22, s23 = s2
+    s30, s31, s32, s33 = s3
 
-    in_s = input_strides
-    ker_s = kernel_strides
-    out_s = output_strides
-
-    for b in prange(out_batch):
-        for oc in prange(out_ch):
-            for oh in prange(out_h):
-                for ow in prange(out_w):
-                    accumulator = 0.0
-                    for ic in prange(in_ch):
-                        for kh in prange(kernel_h):
-                            for kw in prange(kernel_w):
-                                if reverse_order:
-                                    ih = oh + kh - kernel_h + 1
-                                    iw = ow + kw - kernel_w + 1
+    for b in prange(batch):
+        for oc in prange(out_channels):
+            for oh in prange(out_height):
+                for ow in prange(out_width):
+                    acc = 0.0
+                    for ic in prange(in_channels):
+                        for kh_ in prange(kh):
+                            for kw_ in prange(kw):
+                                if reverse:
+                                    ih = oh + kh_ - kh + 1
+                                    iw = ow + kw_ - kw + 1
                                 else:
-                                    ih = oh + kh
-                                    iw = ow + kw
-                                if 0 <= ih < in_h and 0 <= iw < in_w:
-                                    input_idx = (
-                                        b * in_s[0]
-                                        + ic * in_s[1]
-                                        + ih * in_s[2]
-                                        + iw * in_s[3]
+                                    ih = oh + kh_
+                                    iw = ow + kw_
+                                if 0 <= ih < height and 0 <= iw < width:
+                                    acc += (
+                                        input[b * s10 + ic * s11 + ih * s12 + iw * s13]
+                                        * weight[oc * s20 + ic * s21 + kh_ * s22 + kw_ * s23]
                                     )
-                                    kernel_idx = (
-                                        oc * ker_s[0]
-                                        + ic * ker_s[1]
-                                        + kh * ker_s[2]
-                                        + kw * ker_s[3]
-                                    )
-                                    accumulator += (
-                                        input_storage[input_idx]
-                                        * kernel_storage[kernel_idx]
-                                    )
-                    output_idx = (
-                        b * out_s[0] + oc * out_s[1] + oh * out_s[2] + ow * out_s[3]
-                    )
-                    output_storage[output_idx] = accumulator
+                    out[b * s30 + oc * s31 + oh * s32 + ow * s33] = acc
 
 
 tensor_conv2d = njit(_tensor_conv2d, parallel=True, fastmath=True)
@@ -260,80 +236,63 @@ tensor_conv2d = njit(_tensor_conv2d, parallel=True, fastmath=True)
 
 class Conv2dFun(Function):
     @staticmethod
-    def forward(ctx: Context, input_tensor: Tensor, kernel_tensor: Tensor) -> Tensor:
-        """Performs the forward pass of a 2D Convolution.
+    def forward(ctx: Context, input: Tensor, weight: Tensor) -> Tensor:
+        """Compute a 2D Convolution forward pass.
 
         Args:
-        ----
-            ctx (Context): Context to save tensors for backward pass.
-            input_tensor (Tensor): Input tensor with shape (batch, in_channels, height, width).
-            kernel_tensor (Tensor): Kernel tensor with shape (out_channels, in_channels, k_height, k_width).
+            ctx (Context): Context to save tensors for backward.
+            input (Tensor): Input tensor (batch, in_channels, height, width).
+            weight (Tensor): Weight tensor (out_channels, in_channels, k_height, k_width).
 
         Returns:
-        -------
-            Tensor: Output tensor after convolution with shape (batch, out_channels, height, width).
+            Tensor: Output after 2D convolution (batch, out_channels, height, width).
 
         """
-        ctx.save_for_backward(input_tensor, kernel_tensor)
-        batch, in_channels, height, width = input_tensor.shape
-        out_channels, in_channels_k, kernel_h, kernel_w = kernel_tensor.shape
-        assert in_channels == in_channels_k
+        ctx.save_for_backward(input, weight)
+        batch, in_channels, h, w = input.shape
+        out_channels, in_channels_w, kh, kw = weight.shape
+        assert in_channels == in_channels_w
 
-        # Initialize the output tensor with zeros
-        output = input_tensor.zeros((batch, out_channels, height, width))
-
-        # Execute the convolution
+        output = input.zeros((batch, out_channels, h, w))
         tensor_conv2d(
             *output.tuple(),
             output.size,
-            *input_tensor.tuple(),
-            *kernel_tensor.tuple(),
+            *input.tuple(),
+            *weight.tuple(),
             False,
         )
         return output
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
-        """Computes gradients for the 2D Convolution.
+        """Compute gradients for a 2D Convolution."""
+        input, weight = ctx.saved_values
+        batch, in_channels, h, w = input.shape
+        out_channels, in_channels_w, kh, kw = weight.shape
+        assert in_channels == in_channels_w
 
-        Args:
-        ----
-            ctx (Context): Context containing saved tensors.
-            grad_output (Tensor): Gradient of the loss with respect to the output.
-
-        Returns:
-        -------
-            Tuple[Tensor, Tensor]: Gradients with respect to input and kernel tensors.
-
-        """
-        input_tensor, kernel_tensor = ctx.saved_values
-        batch, in_channels, height, width = input_tensor.shape
-        out_channels, in_channels_k, kernel_h, kernel_w = kernel_tensor.shape
-
-        grad_kernel = grad_output.zeros((in_channels, out_channels, kernel_h, kernel_w))
-        transposed_input = input_tensor.permute(1, 0, 2, 3)
-        transposed_grad_output = grad_output.permute(1, 0, 2, 3)
-
+        grad_weight = grad_output.zeros((in_channels, out_channels, kh, kw))
+        new_input = input.permute(1, 0, 2, 3)
+        new_grad_output = grad_output.permute(1, 0, 2, 3)
         tensor_conv2d(
-            *grad_kernel.tuple(),
-            grad_kernel.size,
-            *transposed_input.tuple(),
-            *transposed_grad_output.tuple(),
+            *grad_weight.tuple(),
+            grad_weight.size,
+            *new_input.tuple(),
+            *new_grad_output.tuple(),
             False,
         )
-        grad_kernel = grad_kernel.permute(1, 0, 2, 3)
+        grad_weight = grad_weight.permute(1, 0, 2, 3)
 
-        grad_input = input_tensor.zeros((batch, in_channels, height, width))
-        transposed_kernel = kernel_tensor.permute(1, 0, 2, 3)
-
+        grad_input = input.zeros((batch, in_channels, h, w))
+        new_weight = weight.permute(1, 0, 2, 3)
         tensor_conv2d(
             *grad_input.tuple(),
             grad_input.size,
             *grad_output.tuple(),
-            *transposed_kernel.tuple(),
+            *new_weight.tuple(),
             True,
         )
-        return grad_input, grad_kernel
+        return grad_input, grad_weight
 
 
 conv2d = Conv2dFun.apply
