@@ -100,7 +100,7 @@ class Max(Function):
         return mask * grad_output, 0.0
 
 
-def max(input: Tensor, dim: int = None) -> Tensor:
+def max(input: Tensor, dim: int | None = None) -> Tensor:
     """Compute the max along a specified dimension.
 
     If dim is None, flattens the input and takes the max over all elements.
@@ -119,8 +119,7 @@ def max(input: Tensor, dim: int = None) -> Tensor:
         # Flatten input and take max over all elements
         flat = input.contiguous().view(input.size)
         return Max.apply(flat, input._ensure_tensor(0))
-    else:
-        return Max.apply(input, input._ensure_tensor(dim))
+    return Max.apply(input, input._ensure_tensor(dim))
 
 
 def maxpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
