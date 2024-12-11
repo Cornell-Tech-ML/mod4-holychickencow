@@ -149,7 +149,7 @@ class Conv1dFun(Function):
         new_weight = weight.permute(1, 0, 2)
         tensor_conv1d(# type: ignore
             *grad_input.tuple(),
-            grad_input.size,
+            grad_input.size,# type: ignore
             *grad_output.tuple(),
             *new_weight.tuple(),
             True,# type: ignore
@@ -287,7 +287,7 @@ class Conv2dFun(Function):
         new_weight = weight.permute(1, 0, 2, 3)
         tensor_conv2d(# type: ignore
             *grad_input.tuple(),
-            grad_input.size,
+            grad_input.size,# type: ignore
             *grad_output.tuple(),
             *new_weight.tuple(),
             True,# type: ignore
