@@ -1,95 +1,139 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Tuple, Protocol
-
+from typing import Any, Iterable, List, Tuple, Protocol, Callable
 
 # ## Task 1.1
 # Central Difference calculation
 
 
-def central_difference(f: Any, *vals: Any, arg: int = 0, epsilon: float = 1e-6) -> Any:
-    r"""Computes an approximation to the derivative of `f` with respect to one arg.
-
-    See :doc:`derivative` or https://en.wikipedia.org/wiki/Finite_difference for more details.
+def central_difference(
+    f: Callable, *inputs: Any, target_arg: int = 0, delta: float = 1e-6
+) -> Any:
+    """Computes the central difference approximation for derivatives.
 
     Args:
     ----
-        f : arbitrary function from n-scalar args to one value
-        *vals : n-float values $x_0 \ldots x_{n-1}$
-        arg : the number $i$ of the arg to compute the derivative
-        epsilon : a small constant
+        f (Callable): The function to differentiate.
+        *inputs (Any): The input values to the function.
+        target_arg (int, optional): The index of the argument to compute the derivative with respect to. Defaults to 0.
+        delta (float, optional): The small change to apply for the central difference. Defaults to 1e-6.
 
     Returns:
     -------
-        An approximation of $f'_i(x_0, \ldots, x_{n-1})$
+        Any: The approximated derivative.
 
     """
-    raise NotImplementedError("Need to include this file from past assignment.")
+    inputs_plus = list(inputs)
+    inputs_minus = list(inputs)
+    inputs_plus[target_arg] += delta
+    inputs_minus[target_arg] -= delta
+    f_plus = f(*inputs_plus)
+    f_minus = f(*inputs_minus)
+    difference = f_plus - f_minus
+    return difference / (2 * delta)
 
 
 variable_count = 1
 
 
 class Variable(Protocol):
-    def accumulate_derivative(self, x: Any) -> None: ...
+    def accumulate_derivative(self, x: Any) -> None:
+        """Add `x` to the derivative accumulated on this variable."""
+        ...
 
     @property
-    def unique_id(self) -> int: ...
+    def unique_id(self) -> int:
+        """Unique identifier for the variable."""
+        ...
 
-    def is_leaf(self) -> bool: ...
+    def is_leaf(self) -> bool:
+        """Indicates if this variable is a leaf node (created by the user with no `last_fn`)."""
+        ...
 
-    def is_constant(self) -> bool: ...
+    def is_constant(self) -> bool:
+        """Indicates if this variable is a constant (has no `derivative`)."""
+        ...
 
     @property
-    def parents(self) -> Iterable["Variable"]: ...
+    def parents(self) -> Iterable["Variable"]:
+        """Returns the parent variables of this variable."""
+        ...
 
-    def chain_rule(self, d_output: Any) -> Iterable[Tuple[Variable, Any]]: ...
+    def chain_rule(self, d_output: Any) -> Iterable[Tuple[Variable, Any]]:
+        """Applies the chain rule for backpropagation."""
+        ...
 
 
 def topological_sort(variable: Variable) -> Iterable[Variable]:
-    """Computes the topological order of the computation graph.
+    """Generates the topological order of the computation graph.
 
     Args:
     ----
-        variable: The right-most variable
+        variable (Variable): The variable to start the topological sort from.
 
-    Returns:
-    -------
-        Non-constant Variables in topological order starting from the right.
+    Yields:
+    ------
+        Iterable[Variable]: Variables in topological order.
 
     """
-    raise NotImplementedError("Need to include this file from past assignment.")
+    explored = set()
+    sorted_list: List[Variable] = []
+
+    def explore(node: Variable) -> None:
+        if node.unique_id in explored or node.is_constant():
+            return
+        if not node.is_leaf():
+            for ancestor in node.parents:
+                if not ancestor.is_constant():
+                    explore(ancestor)
+        explored.add(node.unique_id)
+        sorted_list.insert(0, node)
+
+    explore(variable)
+    return sorted_list
 
 
-def backpropagate(variable: Variable, deriv: Any) -> None:
-    """Runs backpropagation on the computation graph in order to
-    compute derivatives for the leave nodes.
+def backpropagate(variable: Variable, gradient: Any) -> None:
+    """Performs backpropagation on the computation graph to compute derivatives for leaf nodes.
 
     Args:
     ----
-        variable: The right-most variable
-        deriv  : Its derivative that we want to propagate backward to the leaves.
-
-    No return. Should write to its results to the derivative values of each leaf through `accumulate_derivative`.
+        variable (Variable): The variable to backpropagate from.
+        gradient (Any): The gradient to propagate.
 
     """
-    raise NotImplementedError("Need to include this file from past assignment.")
+    sorted_vars = topological_sort(variable)
+    gradients_map = {}
+    gradients_map[variable.unique_id] = gradient
+
+    for var in sorted_vars:
+        current_grad = gradients_map[var.unique_id]
+        if var.is_leaf():
+            var.accumulate_derivative(current_grad)
+        else:
+            for parent_var, local_grad in var.chain_rule(current_grad):
+                if parent_var.is_constant():
+                    continue
+                if parent_var.unique_id not in gradients_map:
+                    gradients_map[parent_var.unique_id] = 0.0
+                gradients_map[parent_var.unique_id] += local_grad
 
 
 @dataclass
 class Context:
-    """Context class is used by `Function` to store information during the forward pass."""
+    """Context class used by `Function` to store information during the forward pass."""
 
     no_grad: bool = False
     saved_values: Tuple[Any, ...] = ()
 
-    def save_for_backward(self, *values: Any) -> None:
-        """Store the given `values` if they need to be used during backpropagation."""
+    def save_for_backward(self, *items: Any) -> None:
+        """Stores the provided `items` for potential use during backpropagation."""
         if self.no_grad:
             return
-        self.saved_values = values
+        self.saved_values = items
 
     @property
     def saved_tensors(self) -> Tuple[Any, ...]:
+        """Retrieves the saved tensors."""
         return self.saved_values
