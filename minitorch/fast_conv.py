@@ -236,63 +236,68 @@ tensor_conv2d = njit(_tensor_conv2d, parallel=True, fastmath=True)
 
 class Conv2dFun(Function):
     @staticmethod
-    def forward(ctx: Context, input: Tensor, weight: Tensor) -> Tensor:
-        """Compute a 2D Convolution forward pass.
+    def forward(ctx: Context, input_tensor: Tensor, kernel_tensor: Tensor) -> Tensor:  # noqa: D102
+        ctx.save_for_backward(input_tensor, kernel_tensor)
+        batch, in_channels, height, width = input_tensor.shape
+        out_channels, in_channels_k, kernel_h, kernel_w = kernel_tensor.shape
+        assert in_channels == in_channels_k
 
-        Args:
-            ctx (Context): Context to save tensors for backward.
-            input (Tensor): Input tensor (batch, in_channels, height, width).
-            weight (Tensor): Weight tensor (out_channels, in_channels, k_height, k_width).
-
-        Returns:
-            Tensor: Output after 2D convolution (batch, out_channels, height, width).
-
-        """
-        ctx.save_for_backward(input, weight)
-        batch, in_channels, h, w = input.shape
-        out_channels, in_channels_w, kh, kw = weight.shape
-        assert in_channels == in_channels_w
-
-        output = input.zeros((batch, out_channels, h, w))
-        tensor_conv2d(# type: ignore
-            *output.tuple(),
+        output = input_tensor.zeros((batch, out_channels, height, width))
+        tensor_conv2d(
+            output.storage,
+            output.shape,
+            output.strides,
             output.size,
-            *input.tuple(),
-            *weight.tuple(),
-            False,# type: ignore
+            input_tensor.storage,
+            input_tensor.shape,
+            input_tensor.strides,
+            kernel_tensor.storage,
+            kernel_tensor.shape,
+            kernel_tensor.strides,
+            False
         )
         return output
 
     @staticmethod
-    def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
-        """Compute gradients for a 2D Convolution."""
-        input, weight = ctx.saved_values
-        batch, in_channels, h, w = input.shape
-        out_channels, in_channels_w, kh, kw = weight.shape
-        assert in_channels == in_channels_w
+    def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:  # noqa: D102
+        input_tensor, kernel_tensor = ctx.saved_values
+        batch, in_channels, height, width = input_tensor.shape
+        out_channels, in_channels_k, kernel_h, kernel_w = kernel_tensor.shape
 
-        grad_weight = grad_output.zeros((in_channels, out_channels, kh, kw))
-        new_input = input.permute(1, 0, 2, 3)
-        new_grad_output = grad_output.permute(1, 0, 2, 3)
-        tensor_conv2d(# type: ignore
-            *grad_weight.tuple(),
-            grad_weight.size,
-            *new_input.tuple(),
-            *new_grad_output.tuple(),
-            False,# type: ignore
+        grad_kernel = grad_output.zeros((in_channels, out_channels, kernel_h, kernel_w))
+        transposed_input = input_tensor.permute(1, 0, 2, 3)
+        transposed_grad_output = grad_output.permute(1, 0, 2, 3)
+        tensor_conv2d(
+            grad_kernel.storage,
+            grad_kernel.shape,
+            grad_kernel.strides,
+            grad_kernel.size,
+            transposed_input.storage,
+            transposed_input.shape,
+            transposed_input.strides,
+            transposed_grad_output.storage,
+            transposed_grad_output.shape,
+            transposed_grad_output.strides,
+            False
         )
-        grad_weight = grad_weight.permute(1, 0, 2, 3)
+        grad_kernel = grad_kernel.permute(1, 0, 2, 3)
 
-        grad_input = input.zeros((batch, in_channels, h, w))
-        new_weight = weight.permute(1, 0, 2, 3)
-        tensor_conv2d(# type: ignore
-            *grad_input.tuple(),
+        grad_input = input_tensor.zeros((batch, in_channels, height, width))
+        transposed_kernel = kernel_tensor.permute(1, 0, 2, 3)
+        tensor_conv2d(
+            grad_input.storage,
+            grad_input.shape,
+            grad_input.strides,
             grad_input.size,
-            *grad_output.tuple(),
-            *new_weight.tuple(),
-            True,# type: ignore
+            grad_output.storage,
+            grad_output.shape,
+            grad_output.strides,
+            transposed_kernel.storage,
+            transposed_kernel.shape,
+            transposed_kernel.strides,
+            True
         )
-        return grad_input, grad_weight
+        return grad_input, grad_kernel
 
 
 conv2d = Conv2dFun.apply
