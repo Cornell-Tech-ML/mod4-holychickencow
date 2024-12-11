@@ -76,7 +76,13 @@ tensor_conv1d = njit(_tensor_conv1d, parallel=True)
 
 class Conv1dFun(Function):
     @staticmethod
-    def forward(ctx: Context, input: Tensor, weight: Tensor) -> Tensor:  # noqa: D102
+    def forward(ctx: Context, input_tensor: Tensor, kernel_tensor: Tensor) -> Tensor:  # noqa: D102
+        ctx.save_for_backward(input_tensor, kernel_tensor)
+        batch, in_channels, width = input_tensor.shape
+        out_channels, in_channels_k, kernel_width = kernel_tensor.shape
+        assert in_channels == in_channels_k
+
+    def forward(ctx: Context, input: Tensor, weight: Tensor) -> Tensor:  # noqa: D102, F811, N805
         ctx.save_for_backward(input, weight)
         batch, in_channels, w = input.shape
         out_channels, in_channels_w, kw = weight.shape
